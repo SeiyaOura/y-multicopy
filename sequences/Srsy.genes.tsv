@@ -1,0 +1,3 @@
+symbol	gene_id	chrY_start(GRCm39)	transcript	protein	cds_nt	protein_aa	identity_to_ref	coverage_of_ref
+Srsy	385550	17937329	NM_001371109.1	NP_001358038.1	543	180	1.000	1.000
+Gm21828	115489290	13224566	NM_001373914.1	NP_001360843.1	543	180	1.000	1.000
