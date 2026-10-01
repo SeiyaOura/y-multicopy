@@ -1,0 +1,432 @@
+<title>Yq多コピー配列ビューア</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+JP:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,600&display=swap">
+<style>
+/* Layout: a single working column — family switcher, controls, a reference-anchored alignment
+   grid with a variability track pinned under the ruler, then copy detail, identity heatmap and the
+   Ssty1/Ssty2 paralog strip. Sequences are always monospace and share one column scale. */
+:root {
+  --bg: #f6f7f8;
+  --panel: #ffffff;
+  --ink: #1b2329;
+  --muted: #5f6b74;
+  --faint: #d9dee2;
+  --hair: #e8ebee;
+  --accent: #1d6a8a;          /* gel-stain teal */
+  --accent-soft: #dcebf1;
+  --gap: #a9b3ba;
+  --var-sub: #1d6a8a;
+  --var-gap: #b8c1c7;
+  /* residue chemistry (Clustal-like groups) */
+  --hyd: #2d6fb5; --pos: #c0392b; --neg: #8e44ad; --pol: #1e8a56;
+  --gly: #b9770e; --pro: #9a6b00; --cys: #c2185b; --aro: #127a8a;
+  /* nucleotides */
+  --nA: #1e8a56; --nC: #2d6fb5; --nG: #b9770e; --nT: #c0392b;
+  --chip-a: 0.16;
+  --f-display: "Source Serif 4", "Noto Serif JP", Georgia, serif;
+  --f-body: "IBM Plex Sans JP", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12171b; --panel: #192026; --ink: #e3e8ec; --muted: #94a1ab; --faint: #2c363e; --hair: #232c33;
+  --accent: #5fb4d6; --accent-soft: #1d3442; --gap: #5d6a74; --var-sub: #5fb4d6; --var-gap: #4a565f;
+  --hyd: #7fb2ec; --pos: #f08a7e; --neg: #c79be0; --pol: #6fd1a0; --gly: #e8b45a; --pro: #d9b54a; --cys: #f080b0; --aro: #62c8d6;
+  --nA: #6fd1a0; --nC: #7fb2ec; --nG: #e8b45a; --nT: #f08a7e; --chip-a: 0.22; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #12171b; --panel: #192026; --ink: #e3e8ec; --muted: #94a1ab; --faint: #2c363e; --hair: #232c33;
+  --accent: #5fb4d6; --accent-soft: #1d3442; --gap: #5d6a74; --var-sub: #5fb4d6; --var-gap: #4a565f;
+  --hyd: #7fb2ec; --pos: #f08a7e; --neg: #c79be0; --pol: #6fd1a0; --gly: #e8b45a; --pro: #d9b54a; --cys: #f080b0; --aro: #62c8d6;
+  --nA: #6fd1a0; --nC: #7fb2ec; --nG: #e8b45a; --nT: #f08a7e; --chip-a: 0.22; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.6; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-family: var(--f-display); font-weight: 600; font-size: clamp(1.5rem, 3vw, 2.1rem); line-height: 1.25; margin: 0; text-wrap: balance; }
+h1 em { font-style: italic; }
+h2 { font-family: var(--f-body); font-size: 1.05rem; font-weight: 700; margin: 0; text-wrap: balance; }
+.lede { color: var(--muted); max-width: 68ch; margin: 6px 0 0; }
+.label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.mono { font-family: var(--f-mono); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* family switcher */
+.fams { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 760px) { .fams { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.fam { text-align: left; background: var(--panel); border: 1px solid var(--faint); border-radius: 6px; padding: 12px 14px; cursor: pointer; color: var(--ink); font: inherit; display: flex; flex-direction: column; gap: 4px; }
+.fam:hover { border-color: var(--accent); }
+.fam:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fam[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
+.fam .sym { font-family: var(--f-display); font-style: italic; font-size: 1.25rem; font-weight: 600; line-height: 1.2; }
+.fam .desc { color: var(--muted); font-size: 12px; line-height: 1.4; min-height: 2.8em; }
+.fam .stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+.fam .stats b { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* controls */
+.controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: end; }
+.ctl { display: flex; flex-direction: column; gap: 4px; }
+.seg { display: inline-flex; border: 1px solid var(--faint); border-radius: 5px; overflow: hidden; background: var(--panel); }
+.seg button { font: inherit; font-size: 13px; padding: 5px 12px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--faint); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--panel); }
+select { font: inherit; font-size: 13px; padding: 5px 8px; border: 1px solid var(--faint); border-radius: 5px; background: var(--panel); color: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { font-style: normal; font-family: var(--f-mono); font-weight: 600; padding: 0 4px; border-radius: 3px; }
+
+/* alignment */
+.panel { background: var(--panel); border: 1px solid var(--faint); border-radius: 6px; }
+.aln-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 14px 16px 10px; }
+.aln-head p { margin: 0; color: var(--muted); font-size: 12.5px; }
+.scroller { overflow: auto; max-height: min(62vh, 640px); border-top: 1px solid var(--hair); position: relative; }
+.grid { position: relative; width: max-content; min-width: 100%; font-family: var(--f-mono); font-size: 13px; }
+.r { display: flex; align-items: stretch; height: 21px; }
+.r.sel .nm { background: var(--accent-soft); }
+.r.sel .sq { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+.r:not(.hdr):hover .nm { background: var(--hair); }
+.nm { position: sticky; left: 0; z-index: 2; background: var(--panel); flex: 0 0 auto; width: 236px; display: grid; grid-template-columns: 44px 52px 50px 1fr; align-items: center; gap: 0 4px; padding: 0 10px; border-right: 1px solid var(--faint); font-family: var(--f-body); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.nm .vid { font-family: var(--f-mono); font-weight: 600; }
+.nm .cp, .nm .ln, .nm .id { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.nm .id { padding-right: 2px; }
+.sq { position: relative; white-space: pre; padding: 0 16px 0 8px; line-height: 21px; letter-spacing: 0; }
+.hdr { position: sticky; z-index: 3; background: var(--panel); }
+.hdr .nm { cursor: default; color: var(--muted); font-size: 11px; z-index: 4; }
+.hdr.ruler { top: 0; height: 22px; }
+.hdr.track { top: 22px; height: 40px; border-bottom: 1px solid var(--faint); }
+.ruler .sq { color: var(--muted); }  /* same 13px as rows so columns line up */
+.track canvas { display: block; }
+.sq .m { color: var(--gap); opacity: .6; }
+.sq .g { color: var(--muted); font-weight: 600; }
+.sq b { font-weight: 600; border-radius: 2px; }
+.sq.full .m { color: var(--ink); opacity: .5; }
+.ins { position: absolute; top: 1px; width: 0; height: 19px; border-left: 2px solid var(--pos); pointer-events: auto; }
+.ins::before { content: ""; position: absolute; top: -1px; left: -5px; border: 4px solid transparent; border-top-color: var(--pos); }
+.colhi { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: .12; pointer-events: none; z-index: 1; }
+.tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--panel); font-size: 12px; line-height: 1.45; padding: 6px 9px; border-radius: 4px; max-width: 280px; }
+.tip .mono { font-weight: 600; }
+
+/* detail */
+.detail { padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 18px 28px; }
+@media (max-width: 760px) { .detail { grid-template-columns: minmax(0, 1fr); } }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; margin: 8px 0 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; max-height: 120px; overflow: auto; }
+.chips span { font-family: var(--f-mono); font-size: 11.5px; padding: 1px 6px; border: 1px solid var(--faint); border-radius: 3px; }
+.seqbox { font-family: var(--f-mono); font-size: 12.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--hair); border-radius: 4px; padding: 10px 12px; max-height: 220px; overflow: auto; word-break: break-all; white-space: pre-wrap; margin: 6px 0 0; }
+.copy { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--faint); border-radius: 4px; background: var(--panel); color: var(--ink); cursor: pointer; }
+.copy:hover { border-color: var(--accent); }
+.row-between { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+
+/* heatmap */
+.hm-wrap { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 20px 28px; padding: 16px; align-items: start; }
+@media (max-width: 760px) { .hm-wrap { grid-template-columns: minmax(0, 1fr); } }
+.hm-box { overflow: auto; max-width: 100%; }
+.hm-box canvas { display: block; }
+.scale { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 10px; }
+.scale canvas { border-radius: 2px; }
+.notes { color: var(--muted); font-size: 13px; max-width: 60ch; display: flex; flex-direction: column; gap: 8px; }
+.notes p { margin: 0; }
+
+/* paralog */
+.para { padding: 4px 16px 16px; overflow-x: auto; }
+.para pre { font-family: var(--f-mono); font-size: 12.5px; line-height: 1.45; margin: 0; }
+.para .bar { color: var(--muted); }
+.para .df { color: var(--pos); font-weight: 600; }
+.foot { color: var(--muted); font-size: 12.5px; max-width: 80ch; }
+.foot code { font-family: var(--f-mono); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="label">Mus musculus · chrY 長腕 · RefSeq / GRCm39</div>
+    <h1>マウスYq多コピー遺伝子 <em>Ssty1 · Ssty2 · Sly · Srsy</em> 配列ビューア</h1>
+    <p class="lede">各ファミリーの全コピーを、公式遺伝子名の基準配列に揃えて並べています。同じ配列のコピーは1行にまとめ、何コピーあるかを表示しています。基準と同じ位置は「·」、違う残基だけを文字で示します。</p>
+  </header>
+
+  <nav class="fams" id="fams" aria-label="遺伝子ファミリー"></nav>
+
+  <div class="controls">
+    <div class="ctl"><span class="label">配列</span>
+      <div class="seg" id="kindSeg"><button data-v="aa" aria-pressed="true">タンパク質</button><button data-v="nt" aria-pressed="false">DNA (CDS)</button></div></div>
+    <div class="ctl"><span class="label">表示</span>
+      <div class="seg" id="modeSeg"><button data-v="diff" aria-pressed="true">差分のみ</button><button data-v="full" aria-pressed="false">全残基</button></div></div>
+    <div class="ctl"><label class="label" for="sortSel">並び順</label>
+      <select id="sortSel"><option value="copies">コピー数の多い順</option><option value="identity">基準との一致率順</option><option value="length">長さ順</option></select></div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <section class="panel" aria-labelledby="alnTitle">
+    <div class="aln-head">
+      <h2 id="alnTitle">アライメント</h2>
+      <p id="alnNote"></p>
+    </div>
+    <div class="scroller" id="scroller"><div class="grid" id="grid"></div></div>
+  </section>
+
+  <section class="panel" aria-labelledby="detTitle">
+    <div class="detail" id="detail"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="hmTitle">
+    <div class="aln-head"><h2 id="hmTitle">配列どうしの一致率</h2><p>行と列はアライメントと同じ順番です。マウスを乗せると値が出ます。クリックした行の配列は下の詳細に表示されます。</p></div>
+    <div class="hm-wrap">
+      <div><div class="hm-box"><canvas id="hm"></canvas></div>
+        <div class="scale"><span id="scLo"></span><canvas id="sc" width="160" height="10"></canvas><span>100%</span></div></div>
+      <div class="notes" id="hmNotes"></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="paraTitle">
+    <div class="aln-head"><h2 id="paraTitle">パラログ比較:Ssty1 と Ssty2 の基準タンパク質</h2><p id="paraNote"></p></div>
+    <div class="para" id="para"></div>
+  </section>
+
+  <p class="foot">配列は NCBI RefSeq から <code>fetch_yq_multicopy.py</code> で取得し、<code>viz/build_alignment_data.py</code> で各配列を基準配列とグローバルアライメントしました。末端のギャップはペナルティなしで、一致率は末端の欠けを除いた整列部分で計算しています。基準配列にない挿入は、赤い ▾ の位置に入ります(マウスを乗せると挿入配列が出ます)。RefSeq 転写産物のない偽遺伝子コピーは含みません。</p>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+const DATA = /*DATA*/null;
+
+const AA_CLASS = {A:"hyd",I:"hyd",L:"hyd",M:"hyd",F:"hyd",W:"hyd",V:"hyd",K:"pos",R:"pos",D:"neg",E:"neg",
+  S:"pol",T:"pol",N:"pol",Q:"pol",G:"gly",P:"pro",C:"cys",H:"aro",Y:"aro"};
+const AA_LEG = [["hyd","疎水性","AILMFWV"],["pos","正電荷","KR"],["neg","負電荷","DE"],["pol","極性","STNQ"],
+  ["gly","Gly","G"],["pro","Pro","P"],["cys","Cys","C"],["aro","芳香族/His","HY"]];
+const famOrder = ["Ssty1","Ssty2","Sly","Srsy"];
+const state = { fam: "Ssty1", kind: "aa", mode: "diff", sort: "copies", sel: 0 };
+try { const s = JSON.parse(localStorage.getItem("yqv") || "{}"); Object.assign(state, s, { sel: 0 }); } catch (e) {}
+if (!DATA.families[state.fam]) state.fam = "Ssty1";
+const save = () => { try { localStorage.setItem("yqv", JSON.stringify({ fam: state.fam, kind: state.kind, mode: state.mode, sort: state.sort })); } catch (e) {} };
+
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const pct = x => (x * 100).toFixed(1) + "%";
+const tip = $("tip");
+function showTip(html, x, y) { tip.innerHTML = html; tip.hidden = false;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(x + 14, innerWidth - w - 8) + "px"; tip.style.top = (y + 16 + h > innerHeight ? y - h - 10 : y + 16) + "px"; }
+const hideTip = () => { tip.hidden = true; };
+
+function colorVar(ch, kind) {
+  if (kind === "nt") return "--n" + ch;
+  return AA_CLASS[ch] ? "--" + AA_CLASS[ch] : "--muted";
+}
+
+/* ---------- family cards ---------- */
+function renderFams() {
+  $("fams").innerHTML = famOrder.map(f => {
+    const d = DATA.families[f];
+    const rows = d.aa.rows;
+    const lo = Math.min(...rows.map(r => r.identity));
+    return `<button class="fam" data-f="${f}" aria-pressed="${f === state.fam}">
+      <span class="sym">${f}</span><span class="desc">${d.description}</span>
+      <span class="stats"><span><b>${d.genes}</b> 遺伝子</span><span><b>${d.aa.rows.length}</b> 種のタンパク質</span><span><b>${d.nt.rows.length}</b> 種の CDS</span></span>
+      <span class="stats" style="color:var(--muted)">基準との一致率 ${rows.length > 1 ? pct(lo) + "–100%" : "単一配列"}</span></button>`;
+  }).join("");
+  $("fams").querySelectorAll(".fam").forEach(b => b.onclick = () => { state.fam = b.dataset.f; state.sel = 0; save(); renderAll(); });
+}
+
+function bindSeg(id, key) {
+  $(id).querySelectorAll("button").forEach(b => b.onclick = () => { state[key] = b.dataset.v; if (key === "kind") state.sel = 0; save(); renderAll(); });
+}
+function syncControls() {
+  for (const [id, key] of [["kindSeg", "kind"], ["modeSeg", "mode"]])
+    $(id).querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === state[key]));
+  $("sortSel").value = state.sort;
+  const leg = state.kind === "aa" ? AA_LEG : [["nA","A","A"],["nC","C","C"],["nG","G","G"],["nT","T","T"]];
+  $("legend").innerHTML = leg.map(([c, name, ex]) =>
+    `<span><i style="color:var(--${c});background:color-mix(in srgb,var(--${c}) calc(var(--chip-a)*100%),transparent)">${state.kind === "aa" ? ex[0] : ex}</i>${state.kind === "aa" ? name + " " + ex : ""}</span>`).join("")
+    + `<span><i style="color:var(--gap)">-</i>欠失</span><span><i style="color:var(--pos)">▾</i>挿入</span>`;
+}
+
+/* ---------- alignment ---------- */
+let chW = 7.8;
+function measureCh() {
+  const s = document.createElement("span"); s.className = "mono"; s.style.cssText = "font-size:13px;position:absolute;visibility:hidden;white-space:pre";
+  s.textContent = "X".repeat(100); document.body.appendChild(s); chW = s.getBoundingClientRect().width / 100; s.remove();
+}
+function orderedRows(d) {
+  const idx = d.rows.map((_, i) => i).slice(1);
+  const k = state.sort;
+  idx.sort((a, b) => k === "copies" ? d.rows[b].copies - d.rows[a].copies || a - b
+    : k === "identity" ? d.rows[b].identity - d.rows[a].identity || a - b
+    : d.rows[b].length - d.rows[a].length || a - b);
+  return [0, ...idx];
+}
+function lineHTML(row, ref, kind, mode) {
+  let out = "", i = 0; const L = row.line;
+  while (i < L.length) {
+    const c = L[i];
+    if (c === ".") { let j = i; while (j < L.length && L[j] === ".") j++;
+      out += `<span class="m">${mode === "full" ? ref.slice(i, j) : "·".repeat(j - i)}</span>`; i = j; }
+    else if (c === "-") { let j = i; while (j < L.length && L[j] === "-") j++; out += `<span class="g">${"-".repeat(j - i)}</span>`; i = j; }
+    else { const v = colorVar(c, kind);
+      out += `<b style="color:var(${v});background:color-mix(in srgb,var(${v}) calc(var(--chip-a)*100%),transparent)">${c}</b>`; i++; }
+  }
+  return out;
+}
+function renderAln() {
+  const fam = DATA.families[state.fam], d = fam[state.kind], ref = d.ref, L = ref.length;
+  const order = orderedRows(d);
+  const tot = d.rows.reduce((s, r) => s + r.copies, 0);
+  // variability: copy-weighted fraction differing from reference at each reference position
+  const sub = new Float32Array(L), gap = new Float32Array(L);
+  d.rows.forEach(r => { for (let i = 0; i < L; i++) { const c = r.line[i]; if (c === "-") gap[i] += r.copies; else if (c !== ".") sub[i] += r.copies; } });
+  // right-align numbers so the last digit sits on the numbered column
+  const rArr = Array(L).fill(" ");
+  for (let i = 10; i <= L; i += 10) { const s = String(i); for (let k = 0; k < s.length; k++) { const p = i - s.length + k; if (p >= 0) rArr[p] = s[k]; } }
+  const unit = state.kind === "aa" ? "aa" : "nt";
+  let html = `<div class="r hdr ruler"><div class="nm"><span>配列</span><span style="text-align:right">コピー</span><span style="text-align:right">${unit}</span><span style="text-align:right">一致率</span></div><div class="sq">${rArr.join("")}</div></div>`;
+  html += `<div class="r hdr track"><div class="nm"><span style="grid-column:1/-1;white-space:normal;line-height:1.3">基準と違う<br>コピーの割合</span></div><div class="sq" style="padding-top:3px"><canvas id="trk"></canvas></div></div>`;
+  order.forEach(i => {
+    const r = d.rows[i];
+    const ins = r.ins.map(([p, s], k) => `<span class="ins" data-r="${i}" data-k="${k}" style="left:${8 + p * chW - 1}px"></span>`).join("");
+    html += `<div class="r${i === state.sel ? " sel" : ""}" data-i="${i}"><div class="nm" title="${r.genes.slice(0, 6).join(", ")}${r.genes.length > 6 ? " …" : ""}"><span class="vid">${r.name === "ref" ? state.fam : r.name}</span><span class="cp">×${r.copies}</span><span class="ln">${r.length}</span><span class="id">${r.name === "ref" ? "基準" : pct(r.identity)}</span></div><div class="sq ${state.mode}">${lineHTML(r, ref, state.kind, state.mode)}${ins}</div></div>`;
+  });
+  $("grid").innerHTML = html + `<div class="colhi" id="colhi" hidden></div>`;
+  const varied = Array.from(sub).filter((v, i) => v + gap[i] > 0).length;
+  $("alnNote").textContent = `基準 ${state.fam}(${L} ${unit})に対し、${d.rows.length} 種の配列(${tot} 転写産物)を表示しています。基準と違う位置は ${varied} か所です。`;
+
+  // track canvas
+  const cv = $("trk"), dpr = devicePixelRatio || 1, W = L * chW, H = 32;
+  cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px";
+  const g = cv.getContext("2d"); g.scale(dpr, dpr);
+  g.fillStyle = css("--hair"); g.fillRect(0, H - 1, W, 1);
+  g.fillStyle = css("--faint"); g.fillRect(0, H * 0.5, W, 0.5);
+  const cSub = css("--var-sub"), cGap = css("--var-gap");
+  for (let i = 0; i < L; i++) {
+    const hs = sub[i] / tot * (H - 2), hg = gap[i] / tot * (H - 2);
+    if (hg) { g.fillStyle = cGap; g.fillRect(i * chW + 0.5, H - 1 - hg, Math.max(chW - 1, 1), hg); }
+    if (hs) { g.fillStyle = cSub; g.fillRect(i * chW + 0.5, H - 1 - hg - hs, Math.max(chW - 1, 1), hs); }
+  }
+  bindAln(d, order, sub, gap, tot);
+}
+function bindAln(d, order, sub, gap, tot) {
+  const grid = $("grid"), hi = $("colhi"), ref = d.ref;
+  grid.onmousemove = e => {
+    const ins = e.target.closest(".ins");
+    if (ins) { const r = d.rows[+ins.dataset.r], [p, s] = r.ins[+ins.dataset.k];
+      showTip(`<b>${r.name === "ref" ? state.fam : r.name}</b>:位置 ${p} の後に ${s.length} ${state.kind === "aa" ? "残基" : "塩基"}の挿入<br><span class="mono">${s.length > 60 ? s.slice(0, 60) + "…" : s}</span>`, e.clientX, e.clientY); hi.hidden = true; return; }
+    const sq = e.target.closest(".sq");
+    if (!sq) { hideTip(); hi.hidden = true; return; }
+    const x = e.clientX - sq.getBoundingClientRect().left - 8;
+    const col = Math.floor(x / chW);
+    if (col < 0 || col >= ref.length) { hideTip(); hi.hidden = true; return; }
+    hi.hidden = false; hi.style.left = (sq.offsetLeft + 8 + col * chW) + "px"; hi.style.width = chW + "px";
+    const rowEl = e.target.closest(".r");
+    let html = `位置 <b class="num">${col + 1}</b> · 基準 <span class="mono">${ref[col]}</span>`;
+    if (state.kind === "nt") html += ` · コドン ${Math.floor(col / 3) + 1}`;
+    if (rowEl && rowEl.dataset.i !== undefined) { const r = d.rows[+rowEl.dataset.i], c = r.line[col];
+      html += `<br>${r.name === "ref" ? state.fam : r.name}:<span class="mono">${c === "." ? ref[col] + "(同じ)" : c === "-" ? "欠失" : c}</span>`; }
+    html += `<br>置換 ${pct(sub[col] / tot)} · 欠失 ${pct(gap[col] / tot)}(全 ${tot} コピー中)`;
+    showTip(html, e.clientX, e.clientY);
+  };
+  grid.onmouseleave = () => { hideTip(); hi.hidden = true; };
+  grid.onclick = e => { const r = e.target.closest(".r[data-i]"); if (!r) return; selectRow(+r.dataset.i); };
+}
+function selectRow(i) {
+  state.sel = i;
+  $("grid").querySelectorAll(".r[data-i]").forEach(el => el.classList.toggle("sel", +el.dataset.i === i));
+  renderDetail(); drawHeatmap();
+}
+
+/* ---------- detail ---------- */
+function renderDetail() {
+  const d = DATA.families[state.fam][state.kind], r = d.rows[state.sel];
+  const name = r.name === "ref" ? `${state.fam}(基準)` : r.name;
+  const diffs = [...r.line].filter(c => c !== "." && c !== "-").length, gaps = [...r.line].filter(c => c === "-").length;
+  const unit = state.kind === "aa" ? "aa" : "nt";
+  $("detail").innerHTML = `<div>
+      <span class="label">選択中の配列</span><h2 style="font-family:var(--f-mono)">${name}</h2>
+      <dl class="kv">
+        <dt>コピー数</dt><dd>${r.copies} 転写産物 / ${r.genes.length} 遺伝子</dd>
+        <dt>長さ</dt><dd>${r.length} ${unit}</dd>
+        <dt>基準との一致率</dt><dd>${pct(r.identity)}</dd>
+        <dt>置換 / 欠失 / 挿入</dt><dd>${diffs} / ${gaps} / ${r.ins.reduce((s, x) => s + x[1].length, 0)} ${unit}</dd>
+      </dl>
+      <div class="label" style="margin-top:12px">遺伝子</div><div class="chips">${r.genes.map(g => `<span>${g}</span>`).join("")}</div>
+      <div class="label" style="margin-top:10px">タンパク質アクセッション</div><div class="chips">${r.proteins.map(g => `<span>${g}</span>`).join("")}</div>
+    </div>
+    <div style="min-width:0">
+      <div class="row-between"><span class="label">${state.kind === "aa" ? "タンパク質配列" : "CDS 配列"}(FASTA)</span><button class="copy" id="copyBtn">コピー</button></div>
+      <pre class="seqbox" id="seqbox">&gt;${state.fam}_${r.name} ${r.proteins[0]} n=${r.copies}\n${r.seq.match(/.{1,60}/g).join("\n")}</pre>
+    </div>`;
+  $("copyBtn").onclick = () => {
+    const t = $("seqbox").textContent, b = $("copyBtn");
+    const done = () => { b.textContent = "コピーしました"; setTimeout(() => b.textContent = "コピー", 1600); };
+    navigator.clipboard.writeText(t).then(done).catch(() => {
+      const rg = document.createRange(); rg.selectNodeContents($("seqbox")); const s = getSelection(); s.removeAllRanges(); s.addRange(rg);
+      b.textContent = "選択しました。Ctrl+C でコピー"; });
+  };
+}
+
+/* ---------- heatmap ---------- */
+function mix(a, b, t) { const p = h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16)); const A = p(a), B = p(b);
+  return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(",")})`; }
+function drawHeatmap() {
+  const d = DATA.families[state.fam][state.kind], order = orderedRows(d), n = order.length;
+  const vals = []; order.forEach(a => order.forEach(b => { if (a !== b) vals.push(d.matrix[a][b]); }));
+  const lo = vals.length ? Math.floor(Math.min(...vals) * 100) / 100 : 0.99;
+  const cell = Math.max(5, Math.min(22, Math.floor(440 / n))), lab = 46, W = lab + n * cell, H = lab + n * cell;
+  const cv = $("hm"), dpr = devicePixelRatio || 1;
+  cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px";
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const c0 = css("--panel"), c1 = css("--accent"), ink = css("--muted"), selc = css("--ink");
+  const col = v => mix(c0, c1, lo >= 1 ? 1 : Math.pow((v - lo) / (1 - lo), 1.3));
+  order.forEach((a, y) => order.forEach((b, x) => { g.fillStyle = col(d.matrix[a][b]); g.fillRect(lab + x * cell, lab + y * cell, cell - (cell > 6 ? 1 : 0), cell - (cell > 6 ? 1 : 0)); }));
+  g.fillStyle = ink; g.font = `${Math.min(11, cell)}px ${css("--f-mono")}`; g.textBaseline = "middle";
+  const step = cell < 9 ? Math.ceil(9 / cell) : 1;
+  order.forEach((a, k) => { if (k % step) return; const nm = d.rows[a].name;
+    g.textAlign = "right"; g.fillText(nm, lab - 4, lab + k * cell + cell / 2);
+    g.save(); g.translate(lab + k * cell + cell / 2, lab - 4); g.rotate(-Math.PI / 2); g.textAlign = "left"; g.fillText(nm, 0, 0); g.restore(); });
+  const si = order.indexOf(state.sel);
+  if (si >= 0) { g.strokeStyle = selc; g.lineWidth = 1.5; g.strokeRect(lab + 0.75, lab + si * cell + 0.75, n * cell - 1.5, cell - 1.5); }
+  // scale
+  const sc = $("sc"), sg = sc.getContext("2d"); for (let x = 0; x < 160; x++) { sg.fillStyle = col(lo + (1 - lo) * x / 159); sg.fillRect(x, 0, 1, 10); }
+  $("scLo").textContent = (lo * 100).toFixed(0) + "%";
+  cv.onmousemove = e => { const r = cv.getBoundingClientRect(), x = Math.floor((e.clientX - r.left - lab) / cell), y = Math.floor((e.clientY - r.top - lab) / cell);
+    if (x < 0 || y < 0 || x >= n || y >= n) { hideTip(); return; }
+    const A = d.rows[order[y]], B = d.rows[order[x]];
+    showTip(`<span class="mono">${A.name}</span> × <span class="mono">${B.name}</span><br>一致率 <b>${pct(d.matrix[order[y]][order[x]])}</b>`, e.clientX, e.clientY); };
+  cv.onmouseleave = hideTip;
+  cv.onclick = e => { const r = cv.getBoundingClientRect(), y = Math.floor((e.clientY - r.top - lab) / cell); if (y >= 0 && y < n) selectRow(order[y]); };
+  // notes: clusters at a glance
+  const ids = d.rows.slice(1).map(r => r.identity);
+  const fam = DATA.families[state.fam];
+  const notes = [];
+  notes.push(`<p><b>${state.fam}</b> の ${state.kind === "aa" ? "タンパク質" : "CDS"} は ${d.rows.length} 種類あり、配列どうしの一致率は ${(lo * 100).toFixed(0)}–100% です。</p>`);
+  if (ids.length) notes.push(`<p>基準配列との一致率の中央値は ${pct(ids.sort((a, b) => a - b)[Math.floor(ids.length / 2)])} です。</p>`);
+  if (state.fam === "Sly" && state.kind === "aa") notes.push(`<p>Sly のコピーの多くは、74–107 番目の34残基を欠いた 188 aa 型です。182 aa 型はさらに N 末端の3残基と 178–180 番目を欠き、166/167 aa 型は C 末端の 208–222 番目も欠きます。</p>`);
+  if (state.fam === "Ssty2" && state.kind === "aa") notes.push(`<p>Ssty2 はほとんどが 227 aa で、違いは点在する置換です。C 末端が 30 残基伸びた 257 aa 型(v13)と、131 番目の後に1残基入った型があります。</p>`);
+  if (state.fam === "Srsy") notes.push(`<p>Srsy は RefSeq タンパク質として2コピーしか登録されておらず、2つは同じ配列です。他の多くのコピーは偽遺伝子として扱われ、ここには含まれません。</p>`);
+  notes.push(`<p>色が濃いほど似ています。行をクリックすると、その配列が選択されます。</p>`);
+  $("hmNotes").innerHTML = notes.join("");
+}
+
+/* ---------- paralog ---------- */
+function renderPara() {
+  const p = DATA.paralog, A = p.a, B = p.b; let out = "", ia = 0, ib = 0;
+  for (let s = 0; s < A.length; s += 60) {
+    const a = A.slice(s, s + 60), b = B.slice(s, s + 60);
+    let mid = "", aH = "", bH = "";
+    for (let k = 0; k < a.length; k++) { const same = a[k] === b[k] && a[k] !== "-";
+      mid += same ? "|" : (a[k] === "-" || b[k] === "-") ? " " : "·";
+      aH += same ? a[k] : `<span class="df">${a[k]}</span>`; bH += same ? b[k] : `<span class="df">${b[k]}</span>`; }
+    const sa = ia + 1, sb = ib + 1; ia += a.replace(/-/g, "").length; ib += b.replace(/-/g, "").length;
+    out += `${"Ssty1".padEnd(6)}${String(sa).padStart(4)} ${aH} ${ia}\n${" ".repeat(11)}<span class="bar">${mid}</span>\n${"Ssty2".padEnd(6)}${String(sb).padStart(4)} ${bH} ${ib}\n\n`;
+  }
+  $("para").innerHTML = `<pre>${out}</pre>`;
+  $("paraNote").textContent = `2つの基準タンパク質の一致率は ${pct(p.identity)} です。| は同じ残基、· は違う残基を表し、違う残基は赤字で示しています。`;
+}
+
+function renderAll() { renderFams(); syncControls(); renderAln(); renderDetail(); drawHeatmap(); }
+$("sortSel").onchange = e => { state.sort = e.target.value; save(); renderAll(); };
+bindSeg("kindSeg", "kind"); bindSeg("modeSeg", "mode");
+const start = () => { measureCh(); renderAll(); renderPara(); };
+(document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(start);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { renderAln(); drawHeatmap(); });
+new MutationObserver(() => { renderAln(); drawHeatmap(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>
