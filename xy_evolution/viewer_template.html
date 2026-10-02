@@ -1,0 +1,561 @@
+<title>マウス XY 進化地図</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+JP:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,600&display=swap">
+<style>
+/* Layout: one working column of genome-browser tracks that all share the mouse chromosome
+   coordinate (x), switched between X and Y; summaries first, gene table last. */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --ink: #15171c;
+  --ink-2: #4a505d;
+  --muted: #7a808c;
+  --rule: #dde0e6;
+  --accent: #5a3e9e;          /* Giemsa violet: UI accent only, never a data colour */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --other: #b4b6bb; --absent: #eceef1;
+  --seq0: #eef3fb; --seq1: #9ec5f4; --seq2: #5598e7; --seq3: #256abf; --seq4: #0d366b;
+  --hot: #e34948;
+  --font-display: "Source Serif 4", Georgia, serif;
+  --font-body: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131418; --surface: #1b1d22; --ink: #f2f3f5; --ink-2: #c1c5ce; --muted: #8e94a0;
+    --rule: #30333b; --accent: #a993e6;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --other: #5d6069; --absent: #24262c;
+    --seq0: #1e2430; --seq1: #184f95; --seq2: #2a78d6; --seq3: #6da7ec; --seq4: #cde2fb;
+    --hot: #e66767; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131418; --surface: #1b1d22; --ink: #f2f3f5; --ink-2: #c1c5ce; --muted: #8e94a0;
+  --rule: #30333b; --accent: #a993e6;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --other: #5d6069; --absent: #24262c;
+  --seq0: #1e2430; --seq1: #184f95; --seq2: #2a78d6; --seq3: #6da7ec; --seq4: #cde2fb;
+  --hot: #e66767; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.6 var(--font-body); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; display: grid; gap: 36px; }
+h1, h2 { font-family: var(--font-display); font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.2; }
+h2 { font-size: 21px; }
+p { margin: 0; max-width: 72ch; color: var(--ink-2); }
+.eyebrow { font: 600 11px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+header { display: grid; gap: 12px; }
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  padding-block: 10px; border-bottom: 1px solid var(--rule); display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.seg button { font: 500 14px var(--font-body); background: var(--surface); color: var(--ink-2); border: 0; padding: 6px 16px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 13px; color: var(--ink-2); }
+.stats b { font: 600 15px var(--font-mono); color: var(--ink); font-variant-numeric: tabular-nums; margin-right: 4px; }
+section { display: grid; gap: 12px; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 14px 10px; min-width: 0; overflow-x: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+svg { display: block; overflow: visible; }
+svg text { fill: var(--muted); font: 11px var(--font-body); }
+svg .lab { fill: var(--ink-2); font-size: 12px; }
+svg .mono { font-family: var(--font-mono); font-size: 10.5px; }
+svg .grid { stroke: var(--rule); stroke-width: 1; }
+svg .axis { stroke: var(--muted); stroke-width: 1; }
+.tip { position: fixed; z-index: 20; pointer-events: none; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.5;
+  box-shadow: 0 4px 16px rgb(0 0 0 / .12); max-width: 320px; }
+.tip b { font-weight: 600; }
+.tip .k { color: var(--muted); }
+.tip .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+.two > * { min-width: 0; }
+.note { font-size: 12px; color: var(--muted); max-width: 90ch; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font-weight: 500; color: var(--muted); cursor: pointer; position: sticky; top: 0; background: var(--surface); }
+td.num { text-align: right; font-family: var(--font-mono); }
+td.cell { width: 30px; text-align: center; font: 10.5px var(--font-mono); padding: 3px 2px; }
+.tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px; }
+.tools input, .tools select { font: 13px var(--font-body); padding: 5px 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.more { font: 13px var(--font-body); background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 5px 12px; color: var(--ink-2); cursor: pointer; justify-self: start; }
+.hotlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 6px 18px; font-size: 12.5px; }
+.hotlist div { display: flex; gap: 8px; align-items: baseline; }
+.hotlist .mono { font-family: var(--font-mono); color: var(--ink); }
+.chip { display: inline-block; white-space: nowrap; font: 500 11px var(--font-body); padding: 1px 7px; border-radius: 99px; background: var(--absent); color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">GRCm39 · NCBI Orthologs · phastCons35way</div>
+    <h1>マウス X・Y 染色体の進化地図</h1>
+    <p>マウス X・Y 染色体上のタンパク質コード遺伝子それぞれについて、げっ歯類・霊長類・他の哺乳類・鳥類・爬虫類・両生類・魚類のオルソログがどの染色体にあるか、タンパク質がどれだけ保存されているかを、マウス染色体上の位置に沿って並べた。どのトラックも横軸はマウス染色体の位置 (Mb) で揃えてある。</p>
+  </header>
+
+  <div class="bar">
+    <div class="seg" role="group" aria-label="染色体">
+      <button id="btn-X" aria-pressed="true">X 染色体</button>
+      <button id="btn-Y" aria-pressed="false">Y 染色体</button>
+    </div>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <section>
+    <div class="eyebrow">1 · 相同性</div>
+    <h2>各種のオルソログはどの染色体にあるか</h2>
+    <p>1 本の縦線が 1 遺伝子。行ごとにその種でのオルソログの所在を色分けした。青はその種の X (Y ビューでは X または Y)、橙と緑はその種で多い順に 1・2 番目の常染色体、灰はその他の染色体、空白はオルソログなし。右端にそれぞれの染色体名と遺伝子数を示す。</p>
+    <div class="panel"><div id="synteny"></div></div>
+    <p class="note" id="synteny-note"></p>
+  </section>
+
+  <section>
+    <div class="eyebrow">2 · 保存度</div>
+    <h2>位置ごとの保存度</h2>
+    <p>1 Mb ウィンドウごとの、オルソログとのタンパク質一致度 (%) の平均。下段は 35 種脊椎動物アラインメントに基づく phastCons スコア (遺伝子間・イントロンを含むゲノム全体の平均) と、ラットとの dN/dS の中央値。</p>
+    <div class="panel"><div id="cons"></div></div>
+  </section>
+
+  <section>
+    <div class="eyebrow">3 · 機能遺伝子の分布</div>
+    <h2>機能をもつ遺伝子が集まる位置</h2>
+    <p>1 Mb ごとの遺伝子数を濃淡で示す。赤い印は、その機能区分の遺伝子が染色体全体の割合から期待されるより有意に多いウィンドウ (二項検定 p &lt; 0.01、3 遺伝子以上)。「実験的 GO」は実験的根拠コード (EXP, IDA, IMP, IGI, IPI, IEP など) をもつ GO 注釈がある遺伝子。</p>
+    <div class="panel"><div id="func"></div></div>
+    <div class="hotlist" id="hotlist"></div>
+  </section>
+
+  <section>
+    <div class="eyebrow">4 · 再編成と XY 分岐</div>
+    <h2>X の並び替えと X–Y ガメトログ</h2>
+    <div class="two">
+      <div class="panel"><div id="dot"></div></div>
+      <div class="panel"><div id="gam"></div></div>
+    </div>
+    <p class="note" id="gam-note"></p>
+  </section>
+
+  <section>
+    <div class="eyebrow">5 · 遺伝子一覧</div>
+    <h2>遺伝子ごとの値</h2>
+    <div class="tools">
+      <label for="q">検索</label><input id="q" type="search" placeholder="遺伝子名・ファミリー">
+      <label for="fstr">系統層</label><select id="fstr"></select>
+      <label for="ffun">機能</label><select id="ffun"></select>
+      <span id="count" class="note"></span>
+    </div>
+    <div class="panel" style="max-height: 640px; overflow: auto;"><table id="tbl"></table></div>
+    <button class="more" id="more">さらに表示</button>
+  </section>
+
+  <p class="note" id="foot"></p>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+const DATA = /*DATA*/null;
+const JA = {rat:"ラット", hamster:"ゴールデンハムスター", guinea_pig:"モルモット", human:"ヒト", chimp:"チンパンジー",
+  macaque:"アカゲザル", marmoset:"マーモセット", dog:"イヌ", cow:"ウシ", horse:"ウマ", elephant:"アフリカゾウ",
+  opossum:"オポッサム", platypus:"カモノハシ", chicken:"ニワトリ", anole:"アノール", xenopus:"ネッタイツメガエル", zebrafish:"ゼブラフィッシュ"};
+const CLADE_JA = {Rodentia:"齧歯類", Primates:"霊長類", Laurasiatheria:"ローラシア獣類", Afrotheria:"アフリカ獣類",
+  Marsupialia:"有袋類", Monotremata:"単孔類", Aves:"鳥類", Squamata:"有鱗類", Amphibia:"両生類", Teleostei:"真骨魚類"};
+const STRATUM_JA = {"mouse-specific":"マウス特異的", Murinae:"ネズミ亜科", Rodentia:"齧歯類", Euarchontoglires:"真主齧上目",
+  Eutheria:"真獣類", Theria:"獣類", Mammalia:"哺乳類", Amniota:"有羊膜類", Tetrapoda:"四肢動物", Vertebrata:"脊椎動物"};
+const FUNC = [["n","タンパク質コード遺伝子",null],["n_exp","実験的 GO あり","exp"],["n_reproduction","生殖・精子形成","reproduction"],
+  ["n_nervous","神経系","nervous"],["n_immune","免疫","immune"],["n_chromatin_rna","クロマチン・RNA 代謝","chromatin_rna"],
+  ["n_multi","多コピーファミリー","multi"],["n_specific","齧歯類以下に限局","specific"],["n_old","獣類以前から保存","old"]];
+const CONS_SP = ["rat","human","opossum","chicken"];
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const NS = "http://www.w3.org/2000/svg";
+let CHR = "X";
+const tip = document.getElementById("tip");
+
+function el(tag, attrs, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function showTip(html, ev) {
+  tip.innerHTML = html; tip.hidden = false;
+  const r = tip.getBoundingClientRect();
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - 14;
+  if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - 14;
+  tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
+}
+function hideTip() { tip.hidden = true; }
+const mb = v => (v / 1e6).toFixed(v < 1e7 ? 2 : 1);
+const fmt = (v, d = 1) => v == null ? "–" : (+v).toFixed(d);
+function normChr(c) {
+  if (!c) return "?";
+  c = String(c).split(",")[0];
+  if (/Un|unplaced|unlocalized|scaffold/i.test(c) || /^[A-Z]{1,4}_?\d{5,}/.test(c) || /\.\d+$/.test(c) || c === "?" || c === "MT") return c === "MT" ? "MT" : "?";
+  return c.replace(/^chr/i, "");
+}
+function width(id) { return Math.max(320, document.getElementById(id).clientWidth); }
+
+/* ------------------------------------------------------------- data views */
+const GENES = DATA.genes;
+const SPECIES = DATA.species;
+function chrGenes() { return GENES.filter(g => g.chr === CHR && g.placed && g.start); }
+function chrWindows() { return DATA.windows.filter(w => w.chr === CHR); }
+
+function stats() {
+  const all = GENES.filter(g => g.chr === CHR), gs = chrGenes();
+  const withHuman = all.filter(g => g.o.human).length;
+  const fams = new Set(all.filter(g => g.fam_size > 1).map(g => g.family));
+  const multi = all.filter(g => g.fam_size > 1).length;
+  const L = DATA.chrom_len[CHR];
+  document.getElementById("stats").innerHTML =
+    `<span><b>${all.length}</b>遺伝子</span><span><b>${(L/1e6).toFixed(1)}</b>Mb</span>` +
+    `<span><b>${Math.round(100*withHuman/all.length)}%</b>ヒトにオルソログ</span>` +
+    `<span><b>${multi}</b>多コピー (${fams.size} ファミリー)</span>` +
+    (all.length - gs.length ? `<span><b>${all.length - gs.length}</b>位置未確定</span>` : "");
+}
+
+/* ------------------------------------------------------------- 1. synteny */
+function drawSynteny() {
+  const host = document.getElementById("synteny"); host.innerHTML = "";
+  const W = width("synteny") - 4, left = W < 700 ? 130 : 210, right = 150, rowH = 18, top = 30;
+  const iw = W - left - right, gs = chrGenes(), L = DATA.chrom_len[CHR];
+  const x = p => left + p / L * iw;
+  const H = top + SPECIES.length * rowH + 30;
+  const svg = el("svg", {width: W, height: H, role: "img", "aria-label": "オルソログの染色体所在"}, host);
+  // ideogram: gene density + multicopy shading
+  el("rect", {x: left, y: 6, width: iw, height: 10, rx: 5, fill: css("--absent")}, svg);
+  for (const g of gs) if (g.fam_size > 1) el("rect", {x: x(g.start), y: 6, width: 1.5, height: 10, fill: css("--accent"), opacity: .55}, svg);
+  el("text", {x: left - 8, y: 15, "text-anchor": "end", class: "lab"}, svg, `マウス ${CHR}`);
+  el("text", {x: W - right + 8, y: 15, class: "mono"}, svg, "紫 = 多コピー遺伝子");
+  let lastClade = null;
+  SPECIES.forEach((sp, i) => {
+    const y = top + i * rowH, name = sp.name;
+    const counts = {};
+    for (const g of gs) { const o = g.o[name]; if (o) { const c = normChr(o[0]); counts[c] = (counts[c] || 0) + 1; } }
+    const sexSet = CHR === "X" ? ["X"] : ["X", "Y"];
+    const autos = Object.entries(counts).filter(([c]) => !sexSet.includes(c) && c !== "?").sort((a, b) => b[1] - a[1]);
+    const colorOf = c => sexSet.includes(c) ? css("--s1") : autos[0] && c === autos[0][0] ? css("--s2") : autos[1] && c === autos[1][0] ? css("--s3") : css("--other");
+    if (sp.clade !== lastClade) {
+      if (i) el("line", {x1: 8, x2: W - 8, y1: y - 1, y2: y - 1, class: "grid"}, svg);
+      if (left > 150) el("text", {x: 8, y: y + 12}, svg, CLADE_JA[sp.clade] || sp.clade);
+      lastClade = sp.clade;
+    }
+    el("text", {x: left - 8, y: y + 12, "text-anchor": "end", class: "lab"}, svg, JA[name] || name);
+    el("rect", {x: left, y: y + 2, width: iw, height: rowH - 5, fill: css("--absent")}, svg);
+    for (const g of gs) {
+      const o = g.o[name]; if (!o) continue;
+      el("rect", {x: x(g.start) - .6, y: y + 2, width: 1.6, height: rowH - 5, fill: colorOf(normChr(o[0]))}, svg);
+    }
+    const sexN = sexSet.reduce((s, c) => s + (counts[c] || 0), 0);
+    const parts = [];
+    if (sexN) parts.push([css("--s1"), sexSet.filter(c => counts[c]).join("/") || "X", sexN]);
+    if (autos[0]) parts.push([css("--s2"), autos[0][0], autos[0][1]]);
+    if (autos[1]) parts.push([css("--s3"), autos[1][0], autos[1][1]]);
+    let tx = W - right + 8;
+    for (const [col, lab, n] of parts) {
+      el("rect", {x: tx, y: y + 5, width: 8, height: 8, rx: 2, fill: col}, svg);
+      const t = el("text", {x: tx + 11, y: y + 12, class: "mono"}, svg, `${lab} ${n}`);
+      tx += 14 + t.getComputedTextLength() + 6;
+    }
+  });
+  // axis
+  const ay = top + SPECIES.length * rowH + 4;
+  axisMb(svg, x, L, ay, left, iw);
+  // hover: nearest gene
+  const hit = el("rect", {x: left, y: 0, width: iw, height: ay, fill: "transparent"}, svg);
+  const guide = el("line", {y1: 4, y2: ay, stroke: css("--ink"), "stroke-width": 1, opacity: 0}, svg);
+  const sorted = gs.slice().sort((a, b) => a.start - b.start);
+  hit.addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect(), px = ev.clientX - r.left, pos = (px - left) / iw * L;
+    let best = null, bd = Infinity;
+    for (const g of sorted) { const d = Math.abs(g.start - pos); if (d < bd) { bd = d; best = g; } }
+    if (!best || Math.abs(x(best.start) - px) > 8) { hideTip(); guide.setAttribute("opacity", 0); return; }
+    guide.setAttribute("x1", x(best.start)); guide.setAttribute("x2", x(best.start)); guide.setAttribute("opacity", .35);
+    const rowI = Math.floor((ev.clientY - r.top - top) / rowH), sp = SPECIES[rowI];
+    let html = `<b>${best.sym}</b> <span class="k">${CHR}:${mb(best.start)} Mb</span><br>${best.name || ""}`;
+    html += `<br><span class="k">系統層</span> ${STRATUM_JA[best.stratum] || best.stratum}`;
+    if (best.family) html += ` · <span class="k">ファミリー</span> ${best.family} (${best.fam_size})`;
+    if (sp) {
+      const o = best.o[sp.name];
+      html += `<br><span class="k">${JA[sp.name]}:</span> ` + (o ? `${o[3]} · chr${normChr(o[0])}${o[1] ? ":" + mb(o[1]) + " Mb" : ""} · 一致度 <span class="mono">${fmt(o[2])}%</span>` : "オルソログなし");
+    }
+    showTip(html, ev);
+  });
+  hit.addEventListener("mouseleave", () => { hideTip(); guide.setAttribute("opacity", 0); });
+  const top3 = ["human", "opossum", "platypus", "chicken"].map(s => {
+    const n = gs.filter(g => g.o[s]).length, onX = gs.filter(g => g.o[s] && normChr(g.o[s][0]) === "X").length;
+    return `${JA[s]} ${n} 遺伝子中 ${onX} が X`;
+  }).join("、");
+  document.getElementById("synteny-note").textContent = `オルソログをもつ遺伝子のうち: ${top3}。`;
+}
+
+function axisMb(svg, x, L, y, left, iw, grid = 0) {
+  const step = L > 120e6 ? 20e6 : L > 50e6 ? 10e6 : 5e6;
+  el("line", {x1: left, x2: left + iw, y1: y, y2: y, class: "axis"}, svg);
+  for (let p = 0; p <= L; p += step) {
+    if (grid) el("line", {x1: x(p), x2: x(p), y1: y - grid, y2: y, class: "grid"}, svg);
+    el("line", {x1: x(p), x2: x(p), y1: y, y2: y + 4, class: "axis"}, svg);
+    el("text", {x: x(p), y: y + 16, "text-anchor": "middle", class: "mono"}, svg, `${p / 1e6}`);
+  }
+  el("text", {x: left + iw, y: y + 28, "text-anchor": "end"}, svg, "Mb");
+}
+
+/* ------------------------------------------------------------- 2. conservation */
+function drawCons() {
+  const host = document.getElementById("cons"); host.innerHTML = "";
+  const W = width("cons") - 4, left = 56, right = 90, L = DATA.chrom_len[CHR], iw = W - left - right;
+  const ws = chrWindows(), x = p => left + p / L * iw;
+  const cols = [css("--s1"), css("--s2"), css("--s3"), css("--s4")];
+  const panels = [
+    {key: "pid", label: "タンパク質一致度 (%)", h: 190, min: 0, max: 100, ticks: [0, 25, 50, 75, 100],
+     series: CONS_SP.map((s, i) => ({name: JA[s], get: w => w["pid_" + s], col: cols[i]}))},
+    {key: "phast", label: "phastCons", h: 90, min: 0, max: null, series: [{name: "phastCons", get: w => w.phast, col: cols[0], area: true}]},
+    {key: "dnds", label: "dN/dS (対ラット)", h: 90, min: 0, max: null, series: [{name: "dN/dS", get: w => w.dnds_rat, col: cols[1]}]},
+  ];
+  let H = 10; panels.forEach(p => { p.y0 = H; H += p.h + 26; });
+  const svg = el("svg", {width: W, height: H + 24, role: "img", "aria-label": "位置ごとの保存度"}, host);
+  for (const p of panels) {
+    const vals = p.series.flatMap(s => ws.map(s.get)).filter(v => v != null);
+    let max = p.max ?? niceMax(Math.max(...vals, 0.01));
+    if (p.key === "dnds") max = Math.min(max, 2);
+    const ticks = p.ticks || [0, max / 2, max];
+    const y = v => p.y0 + p.h - (Math.min(v, max) - p.min) / (max - p.min) * p.h;
+    for (const t of ticks) {
+      el("line", {x1: left, x2: left + iw, y1: y(t), y2: y(t), class: "grid"}, svg);
+      el("text", {x: left - 6, y: y(t) + 4, "text-anchor": "end", class: "mono"}, svg, +t.toFixed(2));
+    }
+    el("text", {x: left, y: p.y0 - 2, class: "lab"}, svg, p.label);
+    p.series.forEach(s => {
+      let d = "", pen = false, area = "";
+      ws.forEach(w => {
+        const v = s.get(w), px = x((w.start + w.end) / 2);
+        if (v == null) { pen = false; return; }
+        d += (pen ? "L" : "M") + px.toFixed(1) + "," + y(v).toFixed(1); pen = true;
+      });
+      if (s.area) {
+        const pts = ws.filter(w => s.get(w) != null);
+        if (pts.length) {
+          area = `M${x((pts[0].start + pts[0].end) / 2)},${y(0)}` + pts.map(w => `L${x((w.start + w.end) / 2).toFixed(1)},${y(s.get(w)).toFixed(1)}`).join("") + `L${x((pts.at(-1).start + pts.at(-1).end) / 2)},${y(0)}Z`;
+          el("path", {d: area, fill: s.col, opacity: .18}, svg);
+        }
+      }
+      el("path", {d, fill: "none", stroke: s.col, "stroke-width": 2, "stroke-linejoin": "round"}, svg);
+    });
+    if (p.series.length > 1) {  // direct labels at right end, de-collided
+      const ends = p.series.map(s => {
+        const last = [...ws].reverse().find(w => s.get(w) != null);
+        return {s, v: last ? s.get(last) : 0};
+      }).sort((a, b) => y(a.v) - y(b.v));
+      let prev = -Infinity;
+      for (const e of ends) {
+        let ty = Math.max(y(e.v) + 4, prev + 13); prev = ty;
+        el("rect", {x: left + iw + 8, y: ty - 8, width: 8, height: 8, rx: 2, fill: e.s.col}, svg);
+        el("text", {x: left + iw + 20, y: ty, class: "lab"}, svg, e.s.name);
+      }
+    }
+  }
+  const last = panels.at(-1);
+  axisMb(svg, x, L, last.y0 + last.h + 4, left, iw);
+  crosshair(svg, x, left, iw, 0, last.y0 + last.h, ws, w => {
+    let h = `<b>${CHR}:${mb(w.start)}–${mb(w.end)} Mb</b> <span class="k">(${w.n} 遺伝子)</span><br>`;
+    h += CONS_SP.map(s => `<span class="k">${JA[s]}</span> <span class="mono">${fmt(w["pid_" + s])}%</span>`).join("<br>");
+    h += `<br><span class="k">phastCons</span> <span class="mono">${fmt(w.phast, 3)}</span>`;
+    h += `<br><span class="k">dN/dS (ラット)</span> <span class="mono">${fmt(w.dnds_rat, 2)}</span>`;
+    return h;
+  });
+}
+function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(v))); for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p; return v; }
+
+function crosshair(svg, x, left, iw, y0, y1, ws, html) {
+  const guide = el("line", {y1: y0, y2: y1, stroke: css("--ink"), "stroke-width": 1, opacity: 0}, svg);
+  const hit = el("rect", {x: left, y: y0, width: iw, height: y1 - y0, fill: "transparent"}, svg);
+  hit.addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect(), px = ev.clientX - r.left;
+    const w = ws.find(w => x(w.start) <= px && px < x(w.end)) || ws.at(-1);
+    const cx = x((w.start + w.end) / 2);
+    guide.setAttribute("x1", cx); guide.setAttribute("x2", cx); guide.setAttribute("opacity", .35);
+    showTip(html(w), ev);
+  });
+  hit.addEventListener("mouseleave", () => { hideTip(); guide.setAttribute("opacity", 0); });
+}
+
+/* ------------------------------------------------------------- 3. function */
+function lnGamma(z) { const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, .1208650973866179e-2, -.5395239384953e-5];
+  let x = z, y = z, t = x + 5.5; t -= (x + .5) * Math.log(t); let s = 1.000000000190015; for (const v of c) s += v / ++y; return -t + Math.log(2.5066282746310005 * s / x); }
+function binomUpper(k, n, p) {  // P(X >= k)
+  if (k <= 0) return 1; if (p <= 0) return 0; let s = 0;
+  for (let i = k; i <= n; i++) s += Math.exp(lnGamma(n + 1) - lnGamma(i + 1) - lnGamma(n - i + 1) + i * Math.log(p) + (n - i) * Math.log(1 - p));
+  return Math.min(1, s);
+}
+function drawFunc() {
+  const host = document.getElementById("func"); host.innerHTML = "";
+  const W = width("func") - 4, left = 170, right = 20, L = DATA.chrom_len[CHR], iw = W - left - right, rowH = 22;
+  const ws = chrWindows(), x = p => left + p / L * iw;
+  const totalN = ws.reduce((s, w) => s + w.n, 0);
+  const H = FUNC.length * rowH + 44;
+  const svg = el("svg", {width: W, height: H, role: "img", "aria-label": "機能遺伝子の分布"}, host);
+  const seq = ["--seq0", "--seq1", "--seq2", "--seq3", "--seq4"].map(css);
+  const hot = [];
+  FUNC.forEach(([key, label], i) => {
+    const y = 4 + i * rowH, vals = ws.map(w => w[key] || 0), max = Math.max(...vals, 1);
+    const tot = vals.reduce((a, b) => a + b, 0), p0 = totalN ? tot / totalN : 0;
+    el("text", {x: left - 8, y: y + 14, "text-anchor": "end", class: "lab"}, svg, label);
+    ws.forEach((w, j) => {
+      const v = vals[j], step = v === 0 ? 0 : Math.min(4, 1 + Math.floor(3 * Math.sqrt(v / max) + .0001));
+      el("rect", {x: x(w.start) + .5, y: y + 2, width: Math.max(1, x(w.end) - x(w.start) - 1), height: rowH - 6, fill: seq[step]}, svg);
+      if (key !== "n" && v >= 3) {
+        const pv = binomUpper(v, w.n, p0);
+        if (pv < 0.01) {
+          const cx = x((w.start + w.end) / 2);
+          el("path", {d: `M${cx - 4},${y + rowH - 3}L${cx + 4},${y + rowH - 3}L${cx},${y + rowH - 9}Z`, fill: css("--hot"), stroke: css("--surface"), "stroke-width": 1}, svg);
+          hot.push({label, w, v, pv, exp: w.n * p0});
+        }
+      }
+    });
+  });
+  const ay = 4 + FUNC.length * rowH + 2;
+  axisMb(svg, x, L, ay, left, iw);
+  // sequential legend
+  const lg = el("g", {}, svg);
+  el("text", {x: 8, y: ay + 16}, lg, "少");
+  seq.forEach((c, i) => el("rect", {x: 24 + i * 16, y: ay + 7, width: 14, height: 10, fill: c, stroke: css("--rule")}, lg));
+  el("text", {x: 24 + 5 * 16 + 4, y: ay + 16}, lg, "多");
+  crosshair(svg, x, left, iw, 0, ay, ws, w => {
+    const gs = chrGenes().filter(g => w.start <= (g.start + g.end) / 2 && (g.start + g.end) / 2 < w.end);
+    let h = `<b>${CHR}:${mb(w.start)}–${mb(w.end)} Mb</b><br>` + FUNC.map(([k, l]) => `<span class="k">${l}</span> <span class="mono">${w[k] || 0}</span>`).join("<br>");
+    const names = gs.filter(g => g.go_exp > 0).map(g => g.sym).slice(0, 14);
+    if (names.length) h += `<br><span class="k">主な遺伝子:</span> ${names.join(", ")}`;
+    return h;
+  });
+  hot.sort((a, b) => a.pv - b.pv);
+  document.getElementById("hotlist").innerHTML = hot.length ? hot.slice(0, 24).map(h =>
+    `<div><span class="chip">${h.label}</span><span class="mono">${CHR}:${mb(h.w.start)}–${mb(h.w.end)}</span><span>${h.v} / ${h.w.n} 遺伝子 (期待 ${h.exp.toFixed(1)}, p=${h.pv.toExponential(1)})</span></div>`).join("")
+    : `<div class="note">有意に集中したウィンドウはない。</div>`;
+}
+
+/* ------------------------------------------------------------- 4a. dot plot */
+function drawDot() {
+  const host = document.getElementById("dot"); host.innerHTML = "";
+  const W = width("dot") - 4, H = Math.min(380, W * .9), left = 52, bottom = 40, top = 30, right = 12;
+  const svg = el("svg", {width: W, height: H, role: "img"}, host);
+  const target = CHR;  // mouse X vs human X, mouse Y vs human Y
+  const pts = chrGenes().filter(g => g.o.human && normChr(g.o.human[0]) === target && g.o.human[1]);
+  const L = DATA.chrom_len[CHR], HL = target === "X" ? 156040895 : 57227415;
+  const x = p => left + p / L * (W - left - right), y = p => H - bottom - p / HL * (H - bottom - top);
+  el("text", {x: left, y: 14, class: "lab"}, svg, `マウス ${CHR} (横) とヒト ${target} (縦) のオルソログ位置`);
+  for (let p = 0; p <= HL; p += 25e6) { el("line", {x1: left, x2: W - right, y1: y(p), y2: y(p), class: "grid"}, svg); el("text", {x: left - 6, y: y(p) + 4, "text-anchor": "end", class: "mono"}, svg, p / 1e6); }
+  for (let p = 0; p <= L; p += (L > 100e6 ? 40e6 : 20e6)) el("text", {x: x(p), y: H - bottom + 16, "text-anchor": "middle", class: "mono"}, svg, p / 1e6);
+  el("line", {x1: left, x2: W - right, y1: H - bottom, y2: H - bottom, class: "axis"}, svg);
+  el("text", {x: W - right, y: H - 6, "text-anchor": "end"}, svg, `マウス ${CHR} (Mb)`);
+  el("text", {x: 12, y: top - 6}, svg, `ヒト ${target} (Mb)`);
+  // colour: X-conserved (opossum X) vs X-added (opossum autosome) when on X
+  const cat = g => { if (CHR !== "X") return 0; const o = g.o.opossum; if (!o) return 2; return normChr(o[0]) === "X" ? 0 : 1; };
+  const cols = [css("--s1"), css("--s2"), css("--other")];
+  for (const g of pts) {
+    const c = el("circle", {cx: x(g.start), cy: y(g.o.human[1]), r: 3.2, fill: cols[cat(g)], stroke: css("--surface"), "stroke-width": 1}, svg);
+    c.addEventListener("mousemove", ev => showTip(`<b>${g.sym}</b> / ${g.o.human[3]}<br><span class="k">マウス</span> ${mb(g.start)} Mb · <span class="k">ヒト</span> ${mb(g.o.human[1])} Mb<br><span class="k">一致度</span> <span class="mono">${fmt(g.o.human[2])}%</span>` + (CHR === "X" ? `<br><span class="k">オポッサム</span> ${g.o.opossum ? "chr" + normChr(g.o.opossum[0]) : "なし"}` : ""), ev));
+    c.addEventListener("mouseleave", hideTip);
+  }
+  if (CHR === "X") {
+    const lg = document.createElement("div"); lg.className = "legend";
+    lg.innerHTML = `<span><i style="background:${cols[0]}"></i>オポッサムでも X (X 保存領域, XCR)</span><span><i style="background:${cols[1]}"></i>オポッサムでは常染色体 (X 付加領域, XAR)</span><span><i style="background:${cols[2]}"></i>オポッサムにオルソログなし</span>`;
+    host.appendChild(lg);
+  }
+}
+
+/* ------------------------------------------------------------- 4b. gametologs */
+function drawGam() {
+  const host = document.getElementById("gam"); host.innerHTML = "";
+  const ys = GENES.filter(g => g.chr === "Y" && g.gam);
+  // collapse multicopy Y families to one point (median)
+  const groups = {};
+  for (const g of ys) { const k = g.fam_size > 1 ? g.family : g.sym; (groups[k] = groups[k] || []).push(g); }
+  const pts = Object.entries(groups).map(([k, gs]) => {
+    const med = a => { a = a.filter(v => v != null).sort((p, q) => p - q); return a.length ? a[a.length >> 1] : null; };
+    const xs = gs.map(g => g.gam.x), xsym = mode(xs);
+    const xg = GENES.find(g => g.sym === xsym);
+    return {k, n: gs.length, pid: med(gs.map(g => g.gam.pid)), ds: med(gs.map(g => g.gam.ds)), x: xsym,
+      xpos: xg && xg.start, hpos: xg && xg.o.human && normChr(xg.o.human[0]) === "X" ? xg.o.human[1] : null};
+  }).filter(p => p.pid != null && p.xpos);
+  const W = width("gam") - 4, H = Math.min(380, W * .9), left = 52, bottom = 40, top = 30, right = 16;
+  const svg = el("svg", {width: W, height: H, role: "img"}, host);
+  const L = DATA.chrom_len.X, x = p => left + p / L * (W - left - right), y = v => H - bottom - v / 100 * (H - bottom - top);
+  el("text", {x: left, y: 14, class: "lab"}, svg, "Y 遺伝子と X ガメトログのタンパク質一致度");
+  for (const t of [0, 25, 50, 75, 100]) { el("line", {x1: left, x2: W - right, y1: y(t), y2: y(t), class: "grid"}, svg); el("text", {x: left - 6, y: y(t) + 4, "text-anchor": "end", class: "mono"}, svg, t); }
+  for (let p = 0; p <= L; p += 40e6) el("text", {x: x(p), y: H - bottom + 16, "text-anchor": "middle", class: "mono"}, svg, p / 1e6);
+  el("text", {x: W - right, y: H - 6, "text-anchor": "end"}, svg, "X ガメトログのマウス X 上の位置 (Mb)");
+  el("text", {x: 12, y: top - 6}, svg, "一致度 (%)");
+  const placed = [];
+  pts.sort((a, b) => a.pid - b.pid).forEach(p => {
+    const r = p.n > 1 ? 4 + Math.min(6, Math.sqrt(p.n)) : 4;
+    const c = el("circle", {cx: x(p.xpos), cy: y(p.pid), r, fill: p.n > 1 ? css("--s2") : css("--s1"), stroke: css("--surface"), "stroke-width": 2}, svg);
+    c.addEventListener("mousemove", ev => showTip(`<b>${p.k}</b>${p.n > 1 ? ` (${p.n} コピー, 中央値)` : ""} ↔ <b>${p.x}</b><br><span class="k">一致度</span> <span class="mono">${fmt(p.pid)}%</span> · <span class="k">dS</span> <span class="mono">${p.ds == null ? "飽和" : fmt(p.ds, 2)}</span><br><span class="k">X 側位置</span> ${mb(p.xpos)} Mb` + (p.hpos ? ` · <span class="k">ヒト X</span> ${mb(p.hpos)} Mb` : ""), ev));
+    c.addEventListener("mouseleave", hideTip);
+    let ly = y(p.pid) + 4, lx = x(p.xpos) + r + 4, anchor = "start";
+    if (lx > W - 90) { lx = x(p.xpos) - r - 4; anchor = "end"; }
+    while (placed.some(q => Math.abs(q[0] - lx) < 60 && Math.abs(q[1] - ly) < 12)) ly += 12;
+    placed.push([lx, ly]);
+    el("text", {x: lx, y: ly, "text-anchor": anchor, class: "lab"}, svg, p.k);
+  });
+  const lg = document.createElement("div"); lg.className = "legend";
+  lg.innerHTML = `<span><i style="background:${css("--s1")}"></i>単一コピー Y 遺伝子</span><span><i style="background:${css("--s2")}"></i>多コピーファミリー (大きさ = コピー数)</span>`;
+  host.appendChild(lg);
+  document.getElementById("gam-note").textContent = "左: 点が対角線状に並ぶ区間はマウスとヒトで X の遺伝子順が保たれた区間、段差や逆向きは再編成。色は X 保存領域 (哺乳類共通祖先の X) と X 付加領域 (真獣類の祖先で常染色体から加わった部分) の区別。右: Y 遺伝子ごとに最も類似した X 遺伝子との一致度。一致度が低いほど X と Y の組換えが早く止まった古い層 (evolutionary stratum) に属し、Yq 多コピーファミリー (Sly, Ssty1/2, Srsy) は X 側の対応ファミリー (Slx/Slxl1, Sstx, Srsx) と共に増幅している。";
+}
+function mode(a) { const c = {}; let b = null; for (const v of a) { c[v] = (c[v] || 0) + 1; if (b == null || c[v] > c[b]) b = v; } return b; }
+
+/* ------------------------------------------------------------- 5. table */
+let SHOWN = 120, SORT = {k: "start", dir: 1};
+const TABLE_SP = ["rat", "human", "macaque", "dog", "opossum", "platypus", "chicken", "xenopus", "zebrafish"];
+function setupFilters() {
+  document.getElementById("fstr").innerHTML = `<option value="">すべて</option>` + ["mouse-specific", ...DATA.strata].map(s => `<option value="${s}">${STRATUM_JA[s] || s}</option>`).join("");
+  document.getElementById("ffun").innerHTML = `<option value="">すべて</option><option value="exp">実験的 GO</option><option value="reproduction">生殖・精子形成</option><option value="nervous">神経系</option><option value="immune">免疫</option><option value="chromatin_rna">クロマチン・RNA</option><option value="multi">多コピー</option>`;
+  for (const id of ["q", "fstr", "ffun"]) document.getElementById(id).addEventListener("input", () => { SHOWN = 120; drawTable(); });
+  document.getElementById("more").addEventListener("click", () => { SHOWN += 200; drawTable(); });
+}
+function pidColor(v) {
+  if (v == null) return "";
+  const seq = ["--seq0", "--seq1", "--seq2", "--seq3", "--seq4"].map(css);
+  const i = v >= 90 ? 4 : v >= 75 ? 3 : v >= 55 ? 2 : v >= 35 ? 1 : 0;
+  return `background:${seq[i]};color:${i >= 3 ? css("--surface") : css("--ink")}`;
+}
+function drawTable() {
+  const q = document.getElementById("q").value.trim().toLowerCase(), fs = document.getElementById("fstr").value, ff = document.getElementById("ffun").value;
+  let rows = GENES.filter(g => g.chr === CHR);
+  if (q) rows = rows.filter(g => (g.sym + " " + (g.family || "") + " " + (g.name || "")).toLowerCase().includes(q));
+  if (fs) rows = rows.filter(g => g.stratum === fs);
+  if (ff === "exp") rows = rows.filter(g => g.go_exp > 0); else if (ff === "multi") rows = rows.filter(g => g.fam_size > 1); else if (ff) rows = rows.filter(g => g.func.includes(ff));
+  const key = g => SORT.k.startsWith("sp:") ? (g.o[SORT.k.slice(3)] || [])[2] ?? -1 : g[SORT.k] ?? (typeof g[SORT.k] === "string" ? "" : -1);
+  rows.sort((a, b) => { const A = key(a), B = key(b); return (A > B ? 1 : A < B ? -1 : 0) * SORT.dir; });
+  document.getElementById("count").textContent = `${rows.length} 遺伝子`;
+  const th = (k, l) => `<th data-k="${k}">${l}${SORT.k === k ? (SORT.dir > 0 ? " ▲" : " ▼") : ""}</th>`;
+  let h = `<thead><tr>${th("sym", "遺伝子")}${th("start", "位置 (Mb)")}${th("stratum", "系統層")}${th("family", "ファミリー")}${th("go_exp", "実験 GO")}${th("phast", "phastCons")}` +
+    TABLE_SP.map(s => th("sp:" + s, JA[s].slice(0, 4))).join("") + `<th>X ガメトログ</th></tr></thead><tbody>`;
+  for (const g of rows.slice(0, SHOWN)) {
+    h += `<tr><td title="${(g.name || "").replace(/"/g, "")}"><b>${g.sym}</b></td><td class="num">${g.start ? mb(g.start) : "–"}</td><td>${STRATUM_JA[g.stratum] || g.stratum}</td>` +
+      `<td>${g.fam_size > 1 ? `${g.family} (${g.fam_size})` : ""}</td><td class="num">${g.go_exp || ""}</td><td class="num">${fmt(g.phast, 3)}</td>` +
+      TABLE_SP.map(s => { const o = g.o[s]; return `<td class="cell" style="${o ? pidColor(o[2]) : ""}" title="${o ? `${o[3]} chr${normChr(o[0])}` : "なし"}">${o ? (o[2] == null ? "＋" : Math.round(o[2])) : ""}</td>`; }).join("") +
+      `<td>${g.gam ? `${g.gam.x} <span class="note">${fmt(g.gam.pid)}%</span>` : ""}</td></tr>`;
+  }
+  const tbl = document.getElementById("tbl"); tbl.innerHTML = h + "</tbody>";
+  tbl.querySelectorAll("th[data-k]").forEach(t => t.addEventListener("click", () => { const k = t.dataset.k; SORT = {k, dir: SORT.k === k ? -SORT.dir : (k.startsWith("sp:") || k === "go_exp" || k === "phast" ? -1 : 1)}; drawTable(); }));
+  document.getElementById("more").hidden = rows.length <= SHOWN;
+}
+
+/* ------------------------------------------------------------- wiring */
+function drawAll() { stats(); drawSynteny(); drawCons(); drawFunc(); drawDot(); drawGam(); drawTable(); }
+for (const c of ["X", "Y"]) document.getElementById("btn-" + c).addEventListener("click", () => {
+  CHR = c; for (const d of ["X", "Y"]) document.getElementById("btn-" + d).setAttribute("aria-pressed", d === c); SHOWN = 120; drawAll();
+});
+setupFilters();
+document.getElementById("foot").textContent = `データ: NCBI Gene / Datasets v2 (GRCm39, NCBI Orthologs), UCSC mm39 phastCons35way (ズーム ${DATA.phast_reduction} bp)。一致度はオルソログの最長 CDS を翻訳したタンパク質の大域アラインメント (BLOSUM62) における一致残基 / 整列残基。dN・dS は Nei–Gojobori 法 + Jukes–Cantor 補正。系統層はオルソログが見つかる最も遠い系統。多コピーファミリーはマウス X/Y タンパク質間で一致度 70% 以上の連結成分 (Yq の 4 ファミリーはリポジトリの既存分類を使用)。`;
+let rt, lastW = 0; new ResizeObserver(([e]) => { const w = Math.round(e.contentRect.width); if (w === lastW) return; lastW = w; clearTimeout(rt); rt = setTimeout(drawAll, 120); }).observe(document.querySelector(".wrap"));
+drawAll();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawAll);
+new MutationObserver(drawAll).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+</script>
